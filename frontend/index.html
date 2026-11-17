@@ -2,37 +2,47 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="viewport" string="width=device-width, initial-scale=1"/>
 <title>日切放行</title>
 <script src="/static/vue.global.prod.js"></script>
 <style>
-  :root{--bg:#0b1220;--panel:#121a2b;--line:#243049;--text:#e8eefc;--muted:#93a0b8;--ok:#3ddc97;--bad:#ff6b6b;--accent:#4cc9f0}
+  :root{--bg:#0b1220;--panel:#121a2b;--line:#243049;--text:#e8eefc;--muted:#93a0b8;--ok:#3ddc97;--bad:#ff6b6b;--warn:#ffb84d;--accent:#4cc9f0}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
   .top{display:flex;align-items:center;gap:18px;padding:14px 20px;border-bottom:1px solid var(--line);background:#0e1626}
   .brand{font-weight:700;letter-spacing:.08em;font-size:18px}
   .brand small{display:block;color:var(--muted);font-weight:400;font-size:11px;letter-spacing:.02em;margin-top:2px}
-  .tabs{display:flex;gap:6px;flex:1}
+  .tabs{display:flex;gap:6px;flex:1;flex-wrap:wrap}
   .tabs button{background:transparent;border:1px solid transparent;color:var(--muted);padding:8px 12px;border-radius:999px;cursor:pointer}
   .tabs button.on{color:var(--text);border-color:var(--line);background:#18233a}
   .user{color:var(--muted);font-size:13px}
   .ghost{background:#18233a;border:1px solid var(--line);color:var(--text);padding:7px 10px;border-radius:8px;cursor:pointer}
+  .ghost:disabled{opacity:.45;cursor:not-allowed}
   main{padding:18px 20px 28px}
   .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
   h2{margin:0 0 10px;font-size:15px;color:#c9d4ea}
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}
+  th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
   th{color:var(--muted);font-weight:600}
   input,select{width:100%;background:#0b1220;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;margin:4px 0 10px}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .primary{background:var(--accent);color:#041018;border:0;padding:9px 12px;border-radius:8px;font-weight:700;cursor:pointer}
+  .warnbtn{background:var(--warn);color:#1a1206;border:0;padding:9px 12px;border-radius:8px;font-weight:700;cursor:pointer}
   .mono{font-family:Consolas,"Courier New",monospace}
   .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#1b2a22;color:var(--ok)}
   .tag.bad{background:#2a1518;color:var(--bad)}
+  .tag.wait{background:#2e2410;color:var(--warn)}
+  .tag.frozen{background:#102433;color:var(--accent)}
   .login{max-width:400px;margin:12vh auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px}
   .err{color:var(--bad);min-height:18px;font-size:13px}
-  .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
-  .kpi .panel{padding:12px}.kpi b{display:block;font-size:22px;margin-top:4px}
+  .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+  .kpi .panel{padding:12px;margin-bottom:0}.kpi b{display:block;font-size:22px;margin-top:4px}
+  .note{font-size:12px;color:var(--muted);line-height:1.7}
+  .note b{color:var(--warn)}
+  .kv{display:grid;grid-template-columns:96px 1fr;gap:6px 10px;font-size:13px;line-height:1.6}
+  .kv .k{color:var(--muted)}
+  .strike{text-decoration:line-through;color:var(--bad)}
+  ul.rules{margin:6px 0 0;padding-left:18px;font-size:12px;color:var(--muted);line-height:1.8}
 </style>
 </head>
 <body>
@@ -55,13 +65,23 @@ createApp({
     const token=ref(localStorage.getItem('slicegate_token')||'');
     const user=ref(localStorage.getItem('slicegate_user')||'');
     const username=ref('admin'), password=ref('123456'), err=ref(''), tab=ref(0), actionErr=ref('');
-    const slices=ref([]), releases=ref([]), watermarks=ref([]);
-    const form=ref({slice_no:'SL-2026-11-03-east',biz_date:'2026-11-03',partition_key:'east',row_count:1000,expected_count:1000});
+    const slices=ref([]), releases=ref([]), watermarks=ref([]), ledger=ref([]), boundary=ref(null);
+    const form=ref({slice_no:'SL-2026-11-04-east',biz_date:'2026-11-04',partition_key:'east',row_count:1000,expected_count:1000});
     const releaseSliceId=ref(1), consumer=ref('ads_order');
-    const nav=['切片登记','完整度裁决','下游放行','消费水位'];
+    const detailId=ref(null);
+    const nav=['切片登记','重裁目录','解冻台','下游放行','消费水位','处置页'];
     const completeCnt=computed(()=>slices.value.filter(s=>s.completeness==='完整').length);
     const openCnt=computed(()=>slices.value.filter(s=>s.release_status!=='已放行').length);
+    const frozenCnt=computed(()=>slices.value.filter(s=>s.frozen===1).length);
+    const waitCnt=computed(()=>slices.value.filter(s=>s.completeness==='待重裁').length);
+    const detail=computed(()=>slices.value.find(s=>s.id===detailId.value)||null);
     function auth(){return {Authorization:'Bearer '+token.value,'Content-Type':'application/json'};}
+    function compTag(s){
+      if(s.frozen===1) return {cls:'frozen',txt:'冻结候审'};
+      if(s.completeness==='完整') return {cls:'',txt:'完整'};
+      if(s.completeness==='待重裁') return {cls:'wait',txt:'待重裁'};
+      return {cls:'bad',txt:s.completeness};
+    }
     async function login(){
       err.value='';
       const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})});
@@ -75,23 +95,47 @@ createApp({
       const r=await fetch(url,{headers:auth()});
       const j=await r.json().catch(()=>({}));
       if(r.status===401){ logout(); return null; }
-      return j;
+      return {ok:r.ok,body:j};
     }
     async function refresh(){
       if(!token.value) return;
       const s=await loadJson('/api/slices'); if(s===null) return;
-      slices.value=Array.isArray(s.items)?s.items:[];
+      slices.value=Array.isArray(s.body.items)?s.body.items:[];
       const rel=await loadJson('/api/releases'); if(rel===null) return;
-      releases.value=Array.isArray(rel.items)?rel.items:[];
+      releases.value=Array.isArray(rel.body.items)?rel.body.items:[];
       const w=await loadJson('/api/watermarks'); if(w===null) return;
-      watermarks.value=Array.isArray(w.items)?w.items:[];
-      if(slices.value.length) releaseSliceId.value=slices.value[0].id;
+      watermarks.value=Array.isArray(w.body.items)?w.body.items:[];
+      const l=await loadJson('/api/ledger'); if(l===null) return;
+      ledger.value=Array.isArray(l.body.items)?l.body.items:[];
+      const b=await loadJson('/api/policy/boundary'); if(b===null) return;
+      boundary.value=b.body;
+      if(slices.value.length){
+        releaseSliceId.value=slices.value[0].id;
+        if(detailId.value===null) detailId.value=slices.value[0].id;
+      }
+    }
+    async function postAction(url, okMsg){
+      actionErr.value='';
+      const r=await fetch(url,{method:'POST',headers:auth()});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){actionErr.value=j.detail||'操作失败';}
+      await refresh();
     }
     async function createSlice(){actionErr.value='';const r=await fetch('/api/slices',{method:'POST',headers:auth(),body:JSON.stringify(form.value)});const j=await r.json();if(!r.ok)actionErr.value=j.detail||'失败';await refresh();}
-    async function evaluate(id){await fetch('/api/slices/'+id+'/evaluate',{method:'POST',headers:auth()});await refresh();}
+    async function evaluate(id){await postAction('/api/slices/'+id+'/evaluate');}
+    async function freeze(id){await postAction('/api/slices/'+id+'/freeze');}
+    async function unfreeze(id){await postAction('/api/slices/'+id+'/unfreeze');}
     async function doRelease(){actionErr.value='';const r=await fetch('/api/slices/'+releaseSliceId.value+'/release',{method:'POST',headers:auth(),body:JSON.stringify({consumer:consumer.value})});const j=await r.json();if(!r.ok)actionErr.value=j.detail||'放行失败';await refresh();}
+    function evtTag(e){
+      if(e==='解冻口径偏了') return {cls:'bad',txt:e};
+      if(e==='解冻争用') return {cls:'wait',txt:e};
+      if(e==='重裁回写') return {cls:'',txt:e};
+      return {cls:'frozen',txt:e};
+    }
     onMounted(()=>{if(token.value)refresh();});
-    return {token,user,username,password,err,tab,nav,slices,releases,watermarks,form,releaseSliceId,consumer,actionErr,completeCnt,openCnt,login,logout,createSlice,evaluate,doRelease};
+    return {token,user,username,password,err,tab,nav,slices,releases,watermarks,ledger,boundary,form,
+      releaseSliceId,consumer,actionErr,completeCnt,openCnt,frozenCnt,waitCnt,detailId,detail,
+      login,logout,createSlice,evaluate,freeze,unfreeze,doRelease,compTag,evtTag};
   },
   template:`
   <div v-if="!token" class="login">
@@ -109,17 +153,23 @@ createApp({
       <div class="kpi">
         <div class="panel">切片总数<b class="mono">{{slices.length}}</b></div>
         <div class="panel">已完整<b class="mono">{{completeCnt}}</b></div>
-        <div class="panel">未放行<b class="mono">{{openCnt}}</b></div>
+        <div class="panel">冻结候审<b class="mono">{{frozenCnt}}</b></div>
+        <div class="panel">待重裁<b class="mono">{{waitCnt}}</b></div>
       </div>
+
       <div v-show="tab===0" class="grid">
         <div class="panel">
           <h2>在途切片</h2>
-          <table><thead><tr><th>切片号</th><th>日/区</th><th>实收</th><th>完整度</th><th></th></tr></thead>
+          <table><thead><tr><th>切片号</th><th>日/区</th><th>实收</th><th>完整度</th><th>候审</th><th></th></tr></thead>
           <tbody><tr v-for="s in slices" :key="s.id">
             <td class="mono">{{s.slice_no}}</td><td>{{s.biz_date}} / {{s.partition_key}}</td>
             <td class="mono">{{s.row_count}}/{{s.expected_count}}</td>
-            <td><span class="tag" :class="{bad:s.completeness!=='完整'}">{{s.completeness}}</span></td>
-            <td><button class="ghost" @click="evaluate(s.id)">重裁</button></td>
+            <td><span class="tag" :class="compTag(s).cls">{{compTag(s).txt}}</span></td>
+            <td>{{s.frozen===1?'是':'否'}}</td>
+            <td style="white-space:nowrap">
+              <button class="ghost" @click="evaluate(s.id)">重裁</button>
+              <button v-if="s.frozen!==1 && s.release_status!=='已放行'" class="ghost" @click="freeze(s.id)">冻结</button>
+            </td>
           </tr></tbody></table>
         </div>
         <div class="panel">
@@ -131,21 +181,66 @@ createApp({
           <div class="err">{{actionErr}}</div>
         </div>
       </div>
-      <div v-show="tab===1" class="panel">
-        <h2>完整度裁决</h2>
-        <table><thead><tr><th>切片</th><th>缺口</th><th>结论</th><th>放行态</th></tr></thead>
-        <tbody><tr v-for="s in slices" :key="'c'+s.id">
-          <td class="mono">{{s.slice_no}}</td><td class="mono">{{Math.max(s.expected_count-s.row_count,0)}}</td>
-          <td>{{s.completeness}}</td><td>{{s.release_status}}</td>
-        </tr></tbody></table>
+
+      <div v-show="tab===1">
+        <div class="panel">
+          <h2>重裁目录（正式完整度唯一回写入口）</h2>
+          <table><thead><tr><th>切片</th><th>缺口</th><th>现行完整度</th><th>关前缓存</th><th>放行态</th><th></th></tr></thead>
+          <tbody><tr v-for="s in slices" :key="'c'+s.id">
+            <td class="mono">{{s.slice_no}}</td><td class="mono">{{Math.max(s.expected_count-s.row_count,0)}}</td>
+            <td><span class="tag" :class="compTag(s).cls">{{compTag(s).txt}}</span></td>
+            <td><span v-if="s.preclose_completeness" class="strike">{{s.preclose_completeness}}（已作废，不得当完整）</span><span v-else class="note">—</span></td>
+            <td>{{s.release_status}}</td>
+            <td><button class="ghost" :disabled="s.frozen===1" @click="evaluate(s.id)">重裁回写</button></td>
+          </tr></tbody></table>
+          <p class="note">解冻后现行完整度恒为“待重裁”，须按现行实收/期望重裁；重裁为“完整”后放行闸才放行。</p>
+        </div>
       </div>
+
       <div v-show="tab===2" class="grid">
         <div class="panel">
+          <h2>解冻台</h2>
+          <table><thead><tr><th>切片</th><th>状态</th><th>关前缓存</th><th>操作</th></tr></thead>
+          <tbody><tr v-for="s in slices" :key="'u'+s.id" :style="detailId===s.id?'outline:1px solid var(--accent)':''" @click="detailId=s.id" style="cursor:pointer">
+            <td class="mono">{{s.slice_no}}</td>
+            <td><span class="tag" :class="compTag(s).cls">{{compTag(s).txt}}</span></td>
+            <td><span v-if="s.preclose_completeness" :class="s.frozen===1?'':'strike'">{{s.preclose_completeness}}</span><span v-else class="note">—</span></td>
+            <td @click.stop>
+              <button v-if="s.frozen===1" class="warnbtn" @click="unfreeze(s.id)">解冻</button>
+              <span v-else class="note">非候审</span>
+            </td>
+          </tr></tbody></table>
+          <div class="err">{{actionErr}}</div>
+        </div>
+        <div>
+          <div class="panel" v-if="detail">
+            <h2>切片详情（与解冻台同源 /api/slices）</h2>
+            <div class="kv">
+              <div class="k">切片号</div><div class="mono">{{detail.slice_no}}</div>
+              <div class="k">日/区</div><div>{{detail.biz_date}} / {{detail.partition_key}}</div>
+              <div class="k">实收/期望</div><div class="mono">{{detail.row_count}}/{{detail.expected_count}}</div>
+              <div class="k">现行完整度</div><div><span class="tag" :class="compTag(detail).cls">{{compTag(detail).txt}}</span></div>
+              <div class="k">关前缓存</div><div><span v-if="detail.preclose_completeness" class="strike">{{detail.preclose_completeness}}（仅历史核对）</span><span v-else>—</span></div>
+              <div class="k">候审</div><div>{{detail.frozen===1?'冻结候审中':'否'}}</div>
+              <div class="k">放行态</div><div>{{detail.release_status}}</div>
+            </div>
+          </div>
+          <div class="panel" v-if="boundary">
+            <h2>策略旁注（/api/policy/boundary · v{{boundary.version}}）</h2>
+            <p class="note">选定<b> {{boundary.chosen_path}} 路径</b>：{{boundary.chosen_rule}}</p>
+            <ul class="rules"><li v-for="(t,i) in boundary.invariants" :key="i">{{t}}</li></ul>
+          </div>
+        </div>
+      </div>
+
+      <div v-show="tab===3" class="grid">
+        <div class="panel">
           <h2>申请放行</h2>
-          <label>切片</label><select v-model.number="releaseSliceId"><option v-for="s in slices" :value="s.id">{{s.slice_no}}（{{s.completeness}}）</option></select>
+          <label>切片</label><select v-model.number="releaseSliceId"><option v-for="s in slices" :value="s.id">{{s.slice_no}}（{{s.frozen===1?'冻结候审':s.completeness}}）</option></select>
           <label>下游</label><input v-model="consumer"/>
           <button class="primary" @click="doRelease">放行</button>
           <div class="err">{{actionErr}}</div>
+          <p class="note">冻结候审或待重裁切片一律拦截并登记“解冻口径偏了”，关前缓存不得当完整放行。</p>
         </div>
         <div class="panel">
           <h2>放行流水</h2>
@@ -153,10 +248,21 @@ createApp({
           <tbody><tr v-for="r in releases" :key="r.id"><td class="mono">{{r.slice_no}}</td><td>{{r.consumer}}</td><td>{{r.status}}</td><td class="mono">{{r.created_at}}</td></tr></tbody></table>
         </div>
       </div>
-      <div v-show="tab===3" class="panel">
+
+      <div v-show="tab===4" class="panel">
         <h2>消费水位</h2>
         <table><thead><tr><th>消费方</th><th>业务日</th><th>水位</th><th>来源切片</th></tr></thead>
         <tbody><tr v-for="w in watermarks" :key="w.id"><td>{{w.consumer}}</td><td>{{w.biz_date}}</td><td class="mono">{{w.watermark}}</td><td class="mono">{{w.source_slice}}</td></tr></tbody></table>
+      </div>
+
+      <div v-show="tab===5" class="panel">
+        <h2>处置页（unfreeze_ledger 留痕，/api/ledger）</h2>
+        <table><thead><tr><th>时间</th><th>切片</th><th>事件</th><th>说明</th><th>值班</th></tr></thead>
+        <tbody><tr v-for="l in ledger" :key="l.id">
+          <td class="mono">{{l.created_at}}</td><td class="mono">{{l.slice_no}}</td>
+          <td><span class="tag" :class="evtTag(l.event).cls">{{evtTag(l.event).txt}}</span></td>
+          <td>{{l.detail}}</td><td>{{l.operator}}</td>
+        </tr></tbody></table>
       </div>
     </main>
   </div>`
